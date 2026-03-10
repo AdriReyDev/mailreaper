@@ -723,7 +723,7 @@ input.field::placeholder { color: var(--muted2); }
         <div class="scan-pct" id="scanPct">0%</div>
       </div>
       <div class="scan-title" id="scanTitle">Listo para escanear</div>
-      <div class="scan-subtitle" id="scanSub">Buscará hasta 500 emails con cabeceras de baja</div>
+      <div class="scan-subtitle" id="scanSub">Buscará hasta 2000 emails con cabeceras de baja</div>
       <div class="scan-log" id="scanLog"></div>
     </div>
 
@@ -789,7 +789,7 @@ input.field::placeholder { color: var(--muted2); }
     <div style="flex:1; overflow-y:auto; padding: 0 20px;">
       <div style="margin-bottom:20px;">
         <div class="field-label">Emails máx. a escanear</div>
-        <input class="field" id="cfgMax" type="number" value="500" />
+        <input class="field" id="cfgMax" type="number" value="2000" />
       </div>
       <div style="margin-bottom:20px;">
         <div class="field-label">Palabras clave extra</div>
@@ -967,27 +967,51 @@ async function startScan() {
   setScanProgress(5, 'Conectando con Gmail...');
   addLog('scanLog','Buscando emails de suscripción...','info');
 
-  const maxResults = parseInt(document.getElementById('cfgMax').value) || 500;
+  const maxResults = parseInt(document.getElementById('cfgMax').value) || 2000;
 
   try {
-    const q = 'label:inbox (unsubscribe OR newsletter OR "darse de baja" OR promociones OR suscripcion OR suscripción OR "cancelar suscripcion" OR "cancelar suscripción")';
-    const res = await gmailGet(`https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${maxResults}&q=${encodeURIComponent(q)}`);
+    // 3 métodos de detección para máxima cobertura
+    const queries = [
+      'has:list-unsubscribe',
+      'label:promotions',
+      'unsubscribe OR newsletter OR suscripcion OR "darse de baja"'
+    ];
 
-    if (!res.messages?.length) {
-      addLog('scanLog','Sin resultados. Intenta con otras palabras clave.','err');
+    addLog('scanLog', 'Escaneando con 3 métodos...', 'info');
+    const allIds = new Set();
+
+    for (let qi = 0; qi < queries.length; qi++) {
+      setScanProgress(5 + qi * 10, `Método ${qi+1}/3: ${queries[qi].substring(0,25)}...`);
+      let pageToken = null;
+      let fetched = 0;
+      do {
+        const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=500&q=${encodeURIComponent(queries[qi])}${pageToken ? '&pageToken='+pageToken : ''}`;
+        const res = await gmailGet(url);
+        if (!res.messages?.length) break;
+        res.messages.forEach(m => allIds.add(m.id));
+        fetched += res.messages.length;
+        pageToken = (fetched < maxResults && res.nextPageToken) ? res.nextPageToken : null;
+      } while (pageToken);
+      addLog('scanLog', `Método ${qi+1}: ${allIds.size} emails únicos acumulados`, 'info');
+    }
+
+    const idList = [...allIds];
+    const total = idList.length;
+
+    if (total === 0) {
+      addLog('scanLog','Sin resultados encontrados.','err');
       ring.classList.add('idle');
       btn.innerHTML = '<span>🔍</span> Iniciar escaneo';
       btn.disabled = false;
       return;
     }
 
-    const total = res.messages.length;
-    addLog('scanLog',`${total} emails encontrados. Analizando...`,'info');
+    addLog('scanLog', `${total} emails únicos. Analizando cabeceras...`, 'info');
 
     for (let i = 0; i < total; i++) {
-      setScanProgress(Math.round(10 + (i/total)*85), `Analizando ${i+1}/${total}`);
+      setScanProgress(Math.round(35 + (i/total)*60), `Analizando ${i+1}/${total}`);
       try {
-        const msg = await gmailGet(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${res.messages[i].id}?format=metadata&metadataHeaders=From&metadataHeaders=List-Unsubscribe`);
+        const msg = await gmailGet(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${idList[i]}?format=metadata&metadataHeaders=From&metadataHeaders=List-Unsubscribe`);
         parseMessage(msg);
       } catch(_) {}
     }

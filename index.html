@@ -821,7 +821,7 @@ input.field::placeholder { color: var(--muted2); }
 
 <!-- ══════════ CONNECT MODAL ══════════ -->
 <div class="modal-overlay" id="connectModal" onclick="closeModal('connectModal')">
-  <div class="modal-sheet" onclick="e=>e.stopPropagation()">
+  <div class="modal-sheet" onclick="event.stopPropagation()">
     <div class="modal-handle"></div>
     <div class="modal-title">Conectar Gmail</div>
     <div class="modal-desc">Tus datos nunca salen del dispositivo. Todo se procesa localmente.</div>

@@ -775,6 +775,9 @@ input.field::placeholder { color: var(--muted2); }
       <button class="btn-unsub" id="unsubBtn" onclick="openUnsubModal()" disabled>
         Dar de baja seleccionados
       </button>
+      <button class="btn-unsub" id="deleteBtn" onclick="openDeleteModal()" disabled style="background:var(--surface2);border:1px solid var(--border);color:var(--text);margin-top:0;">
+        🗑️ Eliminar emails de seleccionados
+      </button>
     </div>
   </div>
 
@@ -1119,9 +1122,12 @@ function updateStats() {
 
 function updateUnsubBtn() {
   const btn = document.getElementById('unsubBtn');
+  const del = document.getElementById('deleteBtn');
   const cnt = selectedSenders.size;
   btn.disabled = cnt === 0;
+  del.disabled = cnt === 0;
   btn.textContent = cnt > 0 ? `Dar de baja ${cnt} seleccionados` : 'Dar de baja seleccionados';
+  del.textContent = cnt > 0 ? `🗑️ Eliminar emails de ${cnt} seleccionados` : '🗑️ Eliminar emails de seleccionados';
 }
 
 // ── Unsubscribe ────────────────────────────────────────────────────────────
@@ -1188,7 +1194,87 @@ async function runUnsub() {
   }, 2500);
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// ── Delete emails ──────────────────────────────────────────────────────────
+function openDeleteModal() {
+  if (selectedSenders.size === 0) return;
+  const cnt = selectedSenders.size;
+  const totalEmails = [...selectedSenders].reduce((acc, e) => acc + (senders[e]?.count || 0), 0);
+  if (!confirm(`¿Eliminar ~${totalEmails} emails de ${cnt} remitentes? Se moverán a la papelera.`)) return;
+  document.getElementById('progressModal').classList.add('open');
+  runDelete();
+}
+
+async function runDelete() {
+  const list = [...selectedSenders];
+  const progFill = document.getElementById('progFill');
+  const progStatus = document.getElementById('progStatus');
+  const progTitle = document.getElementById('progTitle');
+  progTitle.textContent = `Eliminando emails de ${list.length} remitentes...`;
+  let totalDeleted = 0;
+
+  for (let i = 0; i < list.length; i++) {
+    const email = list[i];
+    const s = senders[email];
+    progFill.style.width = Math.round((i / list.length) * 100) + '%';
+    progStatus.textContent = `${i+1} de ${list.length}: ${s.name}`;
+    addLog('progLog', `Buscando emails de: ${s.name}`, 'info');
+
+    if (demoMode) {
+      await sleep(400);
+      addLog('progLog', `✓ ${s.count} emails eliminados: ${s.name}`, 'ok');
+      totalDeleted += s.count;
+    } else {
+      try {
+        // Buscar IDs de emails de este remitente
+        const q = `from:${email}`;
+        let pageToken = null;
+        let deleted = 0;
+
+        do {
+          const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=500&q=${encodeURIComponent(q)}${pageToken ? '&pageToken=' + pageToken : ''}`;
+          const res = await gmailGet(url);
+          if (!res.messages?.length) break;
+
+          // Borrado en lote (máx 1000 por batch)
+          const ids = res.messages.map(m => m.id);
+          await gmailBatchDelete(ids);
+          deleted += ids.length;
+          pageToken = res.nextPageToken || null;
+        } while (pageToken);
+
+        addLog('progLog', `✓ ${deleted} emails eliminados: ${s.name}`, 'ok');
+        totalDeleted += deleted;
+      } catch(e) {
+        addLog('progLog', `✗ Error con ${s.name}: ${e.message}`, 'err');
+      }
+    }
+  }
+
+  progFill.style.width = '100%';
+  progTitle.textContent = '¡Completado!';
+  progStatus.textContent = `${totalDeleted} emails movidos a la papelera`;
+  selectedSenders.clear();
+  updateStats();
+  renderList();
+  updateUnsubBtn();
+
+  setTimeout(() => {
+    document.getElementById('progressModal').classList.remove('open');
+    document.getElementById('progFill').style.width = '0%';
+    document.getElementById('progLog').innerHTML = '';
+  }, 3000);
+}
+
+async function gmailBatchDelete(ids) {
+  await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/batchDelete', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ ids })
+  });
+}
 function addLog(boxId, msg, type='') {
   const box = document.getElementById(boxId);
   if (!box) return;

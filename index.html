@@ -970,7 +970,7 @@ async function startScan() {
   const maxResults = parseInt(document.getElementById('cfgMax').value) || 500;
 
   try {
-    const q = 'label:inbox (unsubscribe OR newsletter OR "darse de baja" OR promociones)';
+    const q = 'label:inbox (unsubscribe OR newsletter OR "darse de baja" OR promociones OR suscripcion OR suscripción OR "cancelar suscripcion" OR "cancelar suscripción")';
     const res = await gmailGet(`https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${maxResults}&q=${encodeURIComponent(q)}`);
 
     if (!res.messages?.length) {

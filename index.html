@@ -799,6 +799,15 @@ input.field::placeholder { color: var(--muted2); }
         <div class="field-label">Cuenta conectada</div>
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;font-size:13px;color:var(--muted)" id="cfgAccount">—</div>
       </div>
+      <div style="margin-bottom:16px;">
+        <div class="field-label" style="margin-bottom:10px;">Acciones rápidas</div>
+        <button class="btn-unsub" onclick="vaciarPromociones()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);margin-bottom:12px;">
+          🗑️ Vaciar bandeja Promociones
+        </button>
+        <button class="btn-unsub" onclick="vaciarSpam()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);margin-bottom:12px;">
+          🗑️ Vaciar carpeta Spam
+        </button>
+      </div>
       <button class="btn-outline" onclick="disconnect()" style="border-color:var(--red);color:var(--red);">
         🔌 Desconectar y salir
       </button>
@@ -1275,6 +1284,69 @@ async function gmailBatchDelete(ids) {
     body: JSON.stringify({ ids })
   });
 }
+// ── Vaciar categorías ──────────────────────────────────────────────────────
+async function vaciarPromociones() {
+  await vaciarCategoria('category:promotions', 'Promociones');
+}
+
+async function vaciarSpam() {
+  await vaciarCategoria('in:spam', 'Spam');
+}
+
+async function vaciarCategoria(query, nombre) {
+  if (!confirm(`¿Mover a la papelera TODOS los emails de "${nombre}"?\nEsto puede tardar unos minutos.`)) return;
+
+  document.getElementById('progressModal').classList.add('open');
+  const progFill = document.getElementById('progFill');
+  const progStatus = document.getElementById('progStatus');
+  const progTitle = document.getElementById('progTitle');
+  document.getElementById('progLog').innerHTML = '';
+  progTitle.textContent = `Vaciando ${nombre}...`;
+
+  let totalDeleted = 0;
+  let pageToken = null;
+  let page = 1;
+
+  if (demoMode) {
+    for (let i = 0; i <= 100; i += 20) {
+      await sleep(350);
+      progFill.style.width = i + '%';
+      progStatus.textContent = `Eliminando lote ${page}...`;
+      addLog('progLog', `✓ Lote ${page}: 50 emails eliminados`, 'ok');
+      page++;
+    }
+    totalDeleted = 250;
+  } else {
+    try {
+      do {
+        const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=500&q=${encodeURIComponent(query)}${pageToken ? '&pageToken='+pageToken : ''}`;
+        const res = await gmailGet(url);
+        if (!res.messages?.length) break;
+        const ids = res.messages.map(m => m.id);
+        await gmailBatchDelete(ids);
+        totalDeleted += ids.length;
+        progFill.style.width = Math.min(95, totalDeleted / 10) + '%';
+        progStatus.textContent = `${totalDeleted} emails eliminados...`;
+        addLog('progLog', `✓ Lote ${page}: ${ids.length} emails`, 'ok');
+        page++;
+        pageToken = res.nextPageToken || null;
+        await sleep(300);
+      } while (pageToken);
+    } catch(e) {
+      addLog('progLog', `✗ Error: ${e.message}`, 'err');
+    }
+  }
+
+  progFill.style.width = '100%';
+  progTitle.textContent = '¡Completado!';
+  progStatus.textContent = `${totalDeleted} emails de ${nombre} eliminados`;
+  setTimeout(() => {
+    document.getElementById('progressModal').classList.remove('open');
+    document.getElementById('progFill').style.width = '0%';
+    document.getElementById('progLog').innerHTML = '';
+  }, 3000);
+}
+
 function addLog(boxId, msg, type='') {
   const box = document.getElementById(boxId);
   if (!box) return;
